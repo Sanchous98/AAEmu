@@ -43,10 +43,10 @@ public sealed class MailTests
 
         // Reset singleton caches so Instance properties resolve via ServiceProvider
         typeof(Singleton<MailManager>)
-            .GetField("_instance", BindingFlags.Static | BindingFlags.NonPublic)
+            .GetField("s_instance", BindingFlags.Static | BindingFlags.NonPublic)
             ?.SetValue(null, null);
         typeof(Singleton<NameManager>)
-            .GetField("_instance", BindingFlags.Static | BindingFlags.NonPublic)
+            .GetField("s_instance", BindingFlags.Static | BindingFlags.NonPublic)
             ?.SetValue(null, null);
 
         var services = new ServiceCollection();
@@ -67,10 +67,10 @@ public sealed class MailTests
 
         SingletonContainer.ServiceProvider = null;
         typeof(Singleton<MailManager>)
-            .GetField("_instance", BindingFlags.Static | BindingFlags.NonPublic)
+            .GetField("s_instance", BindingFlags.Static | BindingFlags.NonPublic)
             ?.SetValue(null, null);
         typeof(Singleton<NameManager>)
-            .GetField("_instance", BindingFlags.Static | BindingFlags.NonPublic)
+            .GetField("s_instance", BindingFlags.Static | BindingFlags.NonPublic)
             ?.SetValue(null, null);
     }
 
@@ -90,6 +90,49 @@ public sealed class MailTests
 
         await Assert.That(_mails.SendMailToPlayer(type, receiverCharName, title, text, attachments, money0, money1, money2, extra, itemSlots)).IsEqualTo(MailResult.Success);
         await Assert.That(_character.Money).IsEqualTo(400);
+    }
+
+    [Test]
+    public async Task Send_SameMailTwice_ShouldNotThrow()
+    {
+        // BaseMail.ReturnToSender() re-sends the *same* BaseMail instance (same Id), so MailManager.Send
+        // must upsert. Using Dictionary.Add here threw ArgumentException on the duplicate key, which
+        // broke the character-deletion mail-return path (issue #1175).
+        var mail = new BaseMail
+        {
+            MailType = MailType.Express,
+            ReceiverName = "tester".NormalizeName(),
+            Header = { SenderId = 1, SenderName = "tester".NormalizeName(), ReceiverId = 1 },
+            Body = { Text = "test", SendDate = DateTime.UtcNow, RecvDate = DateTime.UtcNow }
+        };
+
+        await Assert.That(mail.Send()).IsTrue();
+        await Assert.That(mail.Send()).IsTrue();
+        await Assert.That(_mailManager._allPlayerMails.Count).IsEqualTo(1);
+    }
+
+    [Test]
+    public async Task GetCurrentMailList_AsSender_ShouldNotMarkDelivered()
+    {
+        // The sender viewing their own outgoing mail must not advance its delivery/return state,
+        // otherwise ReturnToSender() can never trigger (issue #1175).
+        NameManager.Instance.AddCharacter(2, "bob", 1);
+
+        var mail = new BaseMail
+        {
+            MailType = MailType.Express,
+            ReceiverName = "bob".NormalizeName(),
+            Header = { SenderId = 1, SenderName = "tester".NormalizeName(), ReceiverId = 2 },
+            Body = { Text = "test", SendDate = DateTime.UtcNow, RecvDate = DateTime.UtcNow }
+        };
+
+        await Assert.That(mail.Send()).IsTrue();
+        await Assert.That(mail.IsDelivered).IsFalse();
+
+        _mailManager.GetCurrentMailList(1); // sender (id 1) opens the mailbox
+
+        await Assert.That(mail.IsDelivered).IsFalse();
+        await Assert.That(mail.CanReturnMail()).IsTrue();
     }
 
     [Test]

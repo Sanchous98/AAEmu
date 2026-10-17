@@ -75,7 +75,9 @@ public class MailManager(IMailIdManager mailIdManager, INameManager nameManager,
             Logger.Trace("Send() - Assign new mail Id");
             mail.Id = GetNewMailId();
         }
-        _allPlayerMails.Add(mail.Id, mail);
+        // Upsert instead of Add: ReturnToSender() re-sends the same mail instance (same Id), and
+        // Add() threw ArgumentException on that duplicate key (issue #1175).
+        _allPlayerMails[mail.Id] = mail;
         NotifyNewMailByNameIfOnline(mail, targetName);
         return true;
     }
@@ -308,7 +310,12 @@ public class MailManager(IMailIdManager mailIdManager, INameManager nameManager,
         character?.Mails.UnreadMailCount.ResetReceived();
         foreach (var mail in tempMails)
         {
-            //if ((mail.Value.Header.Status != MailStatus.Read) && (mail.Value.Header.SenderId != character.Id))
+            // Only the receiver is notified about (and has their delivery state advanced by) an incoming
+            // mail. The sender must be able to see their sent mail without it being marked delivered,
+            // otherwise ReturnToSender() can never trigger (issue #1175).
+            if (mail.Value.Header.ReceiverId != characterId)
+                continue;
+
             if (mail.Value.Header.Status != MailStatus.Read)
             {
                 character?.Mails.UnreadMailCount.UpdateReceived(mail.Value.MailType, 1);
