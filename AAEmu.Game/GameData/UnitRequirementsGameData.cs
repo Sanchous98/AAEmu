@@ -203,12 +203,15 @@ public class UnitRequirementsGameData : Singleton<UnitRequirementsGameData>, IGa
 
             if (skillTemplate.OrUnitReqs)
             {
-                // If OrUnitReqs is set, stop checking at the first hit
-                res = true;
-                break;
+                // If OrUnitReqs is set, allow as soon as a single requirement is satisfied
+                res |= reqRes;
+                if (res)
+                    break;
             }
-
-            res &= reqRes;
+            else
+            {
+                res &= reqRes;
+            }
         }
 
         return res ? new UnitReqsValidationResult(SkillResultKeys.ok, 0, 0) : lastFailedCheckResult;
@@ -230,12 +233,15 @@ public class UnitRequirementsGameData : Singleton<UnitRequirementsGameData>, IGa
 
             if (sphere.OrUnitReqs)
             {
-                // If OrUnitReqs is set, stop checking at the first hit
-                res = true;
-                break;
+                // If OrUnitReqs is set, allow as soon as a single requirement is satisfied
+                res |= reqRes;
+                if (res)
+                    break;
             }
-
-            res &= reqRes;
+            else
+            {
+                res &= reqRes;
+            }
         }
         return res;
     }
@@ -254,12 +260,15 @@ public class UnitRequirementsGameData : Singleton<UnitRequirementsGameData>, IGa
 
             if (questComponent.OrUnitReqs)
             {
-                // If OrUnitReqs is set, stop checking at the first hit
-                res = true;
-                break;
+                // If OrUnitReqs is set, allow as soon as a single requirement is satisfied
+                res |= reqRes;
+                if (res)
+                    break;
             }
-
-            res &= reqRes;
+            else
+            {
+                res &= reqRes;
+            }
         }
         return res;
     }
