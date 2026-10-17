@@ -353,6 +353,14 @@ public class Simulation : Patrol
 
     public void MoveTo(Simulation sim, Npc npc, Vector3 target)
     {
+        // A scheduled Simulation move task keeps re-scheduling itself; honor the stop
+        // flag here so StopMove()/GoToPath() actually cancel an in-flight route. Without
+        // this, a legacy Simulation route keeps fighting the v2 AiPathHandler movement.
+        if (!MoveToPathEnabled)
+        {
+            return;
+        }
+
         var move = false;
         var distance = npc.BaseMoveSpeed * (100 / 1000.0f);
         distance *= npc.MoveSpeedMul; // Apply speed modifier

@@ -80,12 +80,8 @@ public class RunCommandSetBehavior : BaseCombatBehavior
                 Logger.Warn($"AI Command: {aiCommand.CmdId} not implemented, NPC {Ai.Owner.ObjId} ({Ai.Owner.TemplateId}), CommandSet {aiCommand.CmdSetId}, P1 {aiCommand.Param1}, P2 {aiCommand.Param2}");
                 break;
             case AiCommandCategory.FollowPath:
-                Ai.LoadAiPathPoints(Ai.AiFileName, aiCommand.Param1 == 1);
-                if (aiCommand.Param1 == 1)
-                {
-                    Ai.PathHandler.AiPathPointsRemaining.Enqueue(new AiPathPoint { Position = Vector3.Zero, Action = AiPathPointAction.ReturnToCommandSet, Param = string.Empty });
-                }
-                Ai.GoToFollowPath();
+                // Remember the path name before loading, otherwise the very first pass
+                // would load an empty/previous file name instead of Param2.
                 if (aiCommand.Param1 == 1)
                 {
                     Ai.AiFileName = aiCommand.Param2;
@@ -94,6 +90,12 @@ public class RunCommandSetBehavior : BaseCombatBehavior
                 {
                     Ai.AiFileName2 = aiCommand.Param2;
                 }
+                Ai.LoadAiPathPoints(aiCommand.Param2, aiCommand.Param1 == 1);
+                if (aiCommand.Param1 == 1)
+                {
+                    Ai.PathHandler.AiPathPointsRemaining.Enqueue(new AiPathPoint { Position = Vector3.Zero, Action = AiPathPointAction.ReturnToCommandSet, Param = string.Empty });
+                }
+                Ai.GoToFollowPath();
 
                 break;
             case AiCommandCategory.UseSkill:

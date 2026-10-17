@@ -28,8 +28,11 @@ public class FollowPathBehavior : BaseCombatBehavior
         Ai.Param = Ai.Owner.Template.AiParams;
 
         Ai.Owner.IsInPatrol = true;
-        Ai.Owner.Simulation.MoveToPathEnabled = true;
-        Ai.Owner.Simulation.GoToPath(Ai.Owner, true);
+        // v2 path following is driven by Ai.PathHandler in Tick(). Stop any legacy
+        // Simulation route here so the two movers don't fight: clearing MoveToPathEnabled
+        // makes in-flight Simulation Move tasks bail out (see Simulation.MoveTo), and
+        // keeping IsInPatrol set makes a concurrent NpcControlEffect route bail out too.
+        Ai.Owner.Simulation.MoveToPathEnabled = false;
 
         _enter = true;
     }
@@ -126,6 +129,10 @@ public class FollowPathBehavior : BaseCombatBehavior
     public override void Exit()
     {
         _enter = false;
+        // Clearing the patrol flag here is required: while it stays set, later
+        // NpcControlEffect handling (FollowPath/RunCommandSet) bails out early and the
+        // NPC never starts a new path.
+        Ai.Owner.IsInPatrol = false;
     }
 
     /* Unused Code (May be removed later)
