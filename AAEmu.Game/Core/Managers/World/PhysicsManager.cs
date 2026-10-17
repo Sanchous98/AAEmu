@@ -37,6 +37,14 @@ public class PhysicsManager
     private const float DefaultWaterLevel = 100f;
 
     /// <summary>
+    /// Maximum time to wait for the physics thread to leave its loop during <see cref="Stop"/>.
+    /// The thread must be gone before the host disposes the DI container, otherwise a tick can still
+    /// resolve DI-backed singletons (e.g. <see cref="AppConfiguration.Instance"/>) and hit an
+    /// <see cref="ObjectDisposedException"/>.
+    /// </summary>
+    private static readonly TimeSpan StopThreadJoinTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
     /// Target Ticks per Second for Physics in this world, use setting as default value
     /// </summary>
     // TODO: Make this variable or configurable from a GM command or dynamic load system
@@ -828,6 +836,15 @@ public class PhysicsManager
     public void Stop()
     {
         ThreadRunning = false;
+
+        // Wait for the loop to actually exit before the host disposes the DI container. Without this,
+        // the thread can outlive the container and its next tick will call AppConfiguration.Instance
+        // (and other Singleton<T>.Instance paths) on a disposed IServiceProvider.
+        if (_thread is { IsAlive: true })
+        {
+            if (!_thread.Join(StopThreadJoinTimeout))
+                Logger.Warn($"PhysicsThread did not stop within {StopThreadJoinTimeout.TotalSeconds:F0}s for {SimulationWorld}");
+        }
     }
 
     public void Dispose() => _physWorld?.Dispose();
