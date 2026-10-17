@@ -22,6 +22,13 @@ public class CSListCharacterPacket() : GamePacket(CSOffsets.CSListCharacterPacke
             )
         );
 
+        // Issue #985: a leave-world request only schedules the actual save ~10s later
+        // (see EnterWorldManager.Leave / LeaveWorldTask). The client is still allowed to
+        // request the character list during that window, and LoadAccount() rebuilds the
+        // list from the database -- which would then report the pre-save (stale) level.
+        // Flush the live character first so the list always reflects the latest state.
+        Connection.ActiveChar?.SaveDirectlyToDatabase();
+
         Connection.LoadAccount();
 
         var characters = Connection.Characters.Values.ToArray();
