@@ -322,9 +322,13 @@ $"Trying to set Npc {Owner.TemplateId}:{Owner.ObjId} current behavior, but it is
         }
         else
         {
-            foreach (var point in points)
+            // Join the path at the checkpoint nearest to the NPC instead of always at index 0.
+            // A shared path can start far from wherever the NPC actually spawned, in which case
+            // it would first walk backwards to the start before making any progress (#1256).
+            var startIndex = AiPathHandler.FindNearestCheckpointIndex(points, Owner.Transform.World.Position);
+            for (var i = Math.Max(0, startIndex); i < points.Count; i++)
             {
-                PathHandler.AiPathPointsRemaining.Enqueue(point);
+                PathHandler.AiPathPointsRemaining.Enqueue(points[i]);
             }
         }
 

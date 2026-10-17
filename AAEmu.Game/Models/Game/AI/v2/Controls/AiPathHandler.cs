@@ -97,6 +97,12 @@ public class AiPathHandler(NpcAi aiOwner)
         // We know where to go? Then go that direction
         if (TargetPosition != Vector3.Zero)
         {
+            // A concurrent NpcControlEffect (RunCommandSet/FollowPath) can (re)start the legacy
+            // Simulation route after FollowPathBehavior.Enter disabled it. Keep it disabled for as
+            // long as the v2 handler is driving movement, otherwise both movers fight over the
+            // transform and the NPC oscillates in place without making progress (#1256).
+            Owner.Owner.Simulation.MoveToPathEnabled = false;
+
             var moveSpeed = Owner.GetRealMovementSpeed(AiPathSpeed);
             // var moveFlags = Owner.GetRealMovementFlags(moveSpeed);
             moveSpeed *= delta.Milliseconds / 1000.0;
@@ -118,5 +124,34 @@ public class AiPathHandler(NpcAi aiOwner)
     public bool HasPathMovementData()
     {
         return AiPathPointsRemaining.Count > 0 || (AiPathLooping && AiPathPoints.Count > 0);
+    }
+
+    /// <summary>
+    /// Returns the index of the path point closest to <paramref name="from"/>, or -1 when the list is empty.
+    /// Paths are shared between spawn points, so joining at the nearest checkpoint (instead of always
+    /// index 0) lets an NPC spawned anywhere along the route walk forward rather than backtracking first.
+    /// </summary>
+    public static int FindNearestCheckpointIndex(IReadOnlyList<AiPathPoint> points, Vector3 from)
+    {
+        if (points == null || points.Count == 0)
+            return -1;
+
+        var bestIndex = 0;
+        var bestDistance = float.MaxValue;
+        for (var i = 0; i < points.Count; i++)
+        {
+            // Action-only rows (speed, loop, return...) carry a zero position and must not be picked.
+            if (points[i].Position.Equals(Vector3.Zero))
+                continue;
+
+            var distance = MathUtil.CalculateDistance(points[i].Position, from, true);
+            if (distance < bestDistance)
+            {
+                bestDistance = distance;
+                bestIndex = i;
+            }
+        }
+
+        return bestIndex;
     }
 }
