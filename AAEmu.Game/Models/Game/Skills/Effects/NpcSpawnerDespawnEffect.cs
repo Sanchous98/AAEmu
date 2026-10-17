@@ -16,9 +16,24 @@ public class NpcSpawnerDespawnEffect : EffectTemplate
     {
         Logger.Info($"NpcSpawnerDespawnEffect: SpawnerId={SpawnerId}");
 
-        //var spawner = SpawnManager.Instance.GetNpcSpawner(SpawnerId, (byte)caster.Transform.WorldId);
-        //spawner.DoDespawn();
+        if (caster?.ParentWorld?.SpawnManager == null)
+            return;
 
-        //Logger.Debug("NpcSpawnerDespawnEffect id:{0}, Npc unitId:{1} spawnerId:{2}", Id, spawner.UnitId, SpawnerId);
+        // GetNpcSpawner(id) only returns event spawners, so the regular world spawners
+        // (loaded from the npc_spawns.json files) are never touched by this effect.
+        var spawners = caster.ParentWorld.SpawnManager.GetNpcSpawner(SpawnerId);
+        if (spawners is not { Count: not 0 })
+        {
+            Logger.Info($"NpcSpawnerDespawnEffect: SpawnerId={SpawnerId} not found in spawners.");
+            return;
+        }
+
+        foreach (var spawner in spawners)
+        {
+            Logger.Info($"NpcSpawnerDespawnEffect: Do Despawn effect id={Id}, Npc unitId={spawner.UnitId} spawnerId={SpawnerId} worldId={caster.Transform.WorldId}");
+            // The paired NpcSpawnerSpawnEffect forces RespawnTime = 0, so a forced (Now)
+            // despawn removes the event NPCs without scheduling a respawn.
+            spawner.DespawnNpcsNow();
+        }
     }
 }
