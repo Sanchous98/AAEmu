@@ -65,6 +65,14 @@ public class PlotTree(uint plotId)
 
                 if (now >= item.timestamp)
                 {
+                    // Apply the effects queued for previously processed events before this node's
+                    // conditions are evaluated. Otherwise SetVariable effects are only flushed once
+                    // the whole tree is done (or a delayed node blocks the queue), so a later
+                    // ConditionVariable check always reads the initial value - this broke plots such
+                    // as Fortuna Die (skill 24353), whose AB/AC/BC rank chain selects a rank from a
+                    // variable set by an earlier event (issue #978).
+                    FlushExecutionQueue(executeQueue, state);
+
                     if (state.Tickets.TryGetValue(node.Event.Id, out var value))
                         state.Tickets[node.Event.Id] = ++value;
                     else
