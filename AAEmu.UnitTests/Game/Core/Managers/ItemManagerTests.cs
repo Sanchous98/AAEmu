@@ -1056,7 +1056,107 @@ public class ItemManagerTests
 
     #endregion
 
+    #region Concurrency Tests
+
+    [Test]
+    public async Task AddItem_ParallelAdds_AllItemsAreStored()
+    {
+        // Arrange
+        var manager = CreateItemManager();
+        var allItems = new Dictionary<ulong, Item>();
+        SetPrivateField(manager, "_allItems", allItems);
+
+        const int threadCount = 8;
+        const int perThread = 500;
+        using var barrier = new Barrier(threadCount);
+        var tasks = new List<System.Threading.Tasks.Task>();
+
+        // Act
+        for (var t = 0; t < threadCount; t++)
+        {
+            var offset = (ulong)(t * perThread + 1);
+            tasks.Add(System.Threading.Tasks.Task.Run(() =>
+            {
+                barrier.SignalAndWait();
+                for (var i = 0; i < perThread; i++)
+                {
+                    var id = offset + (ulong)i;
+                    manager.AddItem(CreateTestItem(id, (uint)id, 1));
+                }
+            }));
+        }
+
+        System.Threading.Tasks.Task.WaitAll(tasks.ToArray());
+
+        // Assert - without the lock on _allItems this loses entries and/or throws
+        await Assert.That(allItems.Count).IsEqualTo(threadCount * perThread);
+        await Assert.That(manager.GetItemByItemId(1)).IsNotNull();
+        await Assert.That(manager.GetItemByItemId((ulong)(threadCount * perThread))).IsNotNull();
+    }
+
+    [Test]
+    public async Task GetItemContainerForCharacter_ParallelConstruction_DoesNotThrowOrLoseContainers()
+    {
+        // Arrange
+        EnsureContainerIdManagerInitialized();
+        var manager = CreateItemManager();
+        var containers = new Dictionary<ulong, ItemContainer>();
+        SetPrivateField(manager, "_allPersistentContainers", containers);
+
+        const int threadCount = 8;
+        const int perThread = 1000;
+        var errors = new System.Collections.Concurrent.ConcurrentQueue<Exception>();
+        using var barrier = new Barrier(threadCount);
+        var threads = new List<Thread>();
+
+        // Act - all threads construct containers together so the enumeration races the Add calls
+        for (var i = 0; i < threadCount; i++)
+        {
+            var index = i;
+            var thread = new Thread(() =>
+            {
+                try
+                {
+                    barrier.SignalAndWait();
+                    for (var j = 0; j < perThread; j++)
+                    {
+                        var ownerId = (uint)(index * perThread + j + 1);
+                        manager.GetItemContainerForCharacter(ownerId, SlotType.Inventory, null, 0);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    errors.Enqueue(ex);
+                }
+            });
+            threads.Add(thread);
+            thread.Start();
+        }
+
+        foreach (var thread in threads)
+            thread.Join();
+
+        // Assert - without the lock the enumeration is invalidated by concurrent Add calls
+        await Assert.That(errors).IsEmpty();
+        await Assert.That(containers.Count).IsEqualTo(threadCount * perThread);
+    }
+
+    #endregion
+
     #region Helper Methods
+
+    private static readonly object ContainerIdManagerInitLock = new();
+
+    private static void EnsureContainerIdManagerInitialized()
+    {
+        // Container construction allocates ids through the ContainerIdManager singleton, which is not
+        // initialized in unit tests. Initialize() falls back to its default id range when the database
+        // is unavailable (the normal case here).
+        lock (ContainerIdManagerInitLock)
+        {
+            ContainerIdManager.Instance.Initialize();
+        }
+    }
 
     private static ItemManager CreateItemManager(
         Mock<ISkillManager> mockSkill = null,

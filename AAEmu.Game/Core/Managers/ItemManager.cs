@@ -73,9 +73,13 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
     private DateTime LastTimerCheck { get; set; }
     private object ItemTimerLock { get; set; }
 
-    private Dictionary<ulong, Item> _allItems;
-    private List<ulong> _removedItems;
-    private Dictionary<ulong, ItemContainer> _allPersistentContainers;
+    // These collections are mutated from multiple connection IO threads and read/saved by
+    // the SaveManager thread. They are initialized once here (never reassigned) so that
+    // locking on the instance itself stays stable. Consistent lock order is:
+    // _removedItems -> _allItems -> _allPersistentContainers.
+    private Dictionary<ulong, Item> _allItems = [];
+    private List<ulong> _removedItems = [];
+    private Dictionary<ulong, ItemContainer> _allPersistentContainers = [];
     private bool _loadedUserItems;
     // private Dictionary<ulong, Item> _timerSubscriptionsItems;
 
@@ -388,10 +392,14 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
         item.CreateTime = DateTime.UtcNow;
         if (generateId)
         {
-            if (!_allItems.TryAdd(item.Id, item))
+            // The lock is reentrant, so callers that already hold it (e.g. LoadUserItems) are unaffected.
+            lock (_allItems)
             {
-                Logger.Error($"Failed to load item with ID {item.Id}, possible duplicate entries!");
-                return null;
+                if (!_allItems.TryAdd(item.Id, item))
+                {
+                    Logger.Error($"Failed to load item with ID {item.Id}, possible duplicate entries!");
+                    return null;
+                }
             }
         }
 
@@ -402,10 +410,13 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
     {
         ArgumentNullException.ThrowIfNull(item);
 
-        if (!_allItems.TryAdd(item.Id, item))
+        lock (_allItems)
         {
-            Logger.Error($"Failed to load item with ID {item.Id}, possible duplicate entries!");
-            return false;
+            if (!_allItems.TryAdd(item.Id, item))
+            {
+                Logger.Error($"Failed to load item with ID {item.Id}, possible duplicate entries!");
+                return false;
+            }
         }
         return true;
     }
@@ -1443,7 +1454,10 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
 
     public Item GetItemByItemId(ulong itemId)
     {
-        return _allItems.GetValueOrDefault(itemId);
+        lock (_allItems)
+        {
+            return _allItems.GetValueOrDefault(itemId);
+        }
     }
 
     public (int, int, int) Save(MySqlConnection connection, MySqlTransaction transaction)
@@ -1632,11 +1646,14 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
 
     public SlotType GetContainerSlotTypeByContainerId(ulong dbId)
     {
-        _allPersistentContainers.TryGetValue(dbId, out var container);
-
-        if (container != null)
+        lock (_allPersistentContainers)
         {
-            return container.ContainerType;
+            _allPersistentContainers.TryGetValue(dbId, out var container);
+
+            if (container != null)
+            {
+                return container.ContainerType;
+            }
         }
 
         return SlotType.None;
@@ -1652,44 +1669,55 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
     /// <returns></returns>
     public ItemContainer GetItemContainerForCharacter(uint characterId, SlotType slotType, Unit parentUnit, uint mateId)
     {
-        foreach (var c in _allPersistentContainers.Values)
+        // Must be atomic: the enumeration below races with Add calls from other connection IO
+        // threads and would otherwise throw "collection was modified" or miss a container.
+        lock (_allPersistentContainers)
         {
-            if (c.OwnerId == characterId && c.ContainerType == slotType && c.MateId == mateId)
+            foreach (var c in _allPersistentContainers.Values)
             {
-                if (parentUnit != null)
-                    c.ParentUnit = parentUnit;
-                return c;
+                if (c.OwnerId == characterId && c.ContainerType == slotType && c.MateId == mateId)
+                {
+                    if (parentUnit != null)
+                        c.ParentUnit = parentUnit;
+                    return c;
+                }
             }
+
+            var newContainerType = slotType switch
+            {
+                SlotType.Equipment => "EquipmentContainer",
+                SlotType.EquipmentMate => "MateEquipmentContainer",
+                _ => "ItemContainer"
+            };
+
+            var newContainer = ItemContainer.CreateByTypeName(newContainerType, characterId, slotType, slotType != SlotType.None, parentUnit);
+
+            if (slotType != SlotType.None)
+                _allPersistentContainers.Add(newContainer.ContainerId, newContainer);
+
+            if (mateId > 0)
+                newContainer.MateId = mateId;
+
+            return newContainer;
         }
-
-        var newContainerType = slotType switch
-        {
-            SlotType.Equipment => "EquipmentContainer",
-            SlotType.EquipmentMate => "MateEquipmentContainer",
-            _ => "ItemContainer"
-        };
-
-        var newContainer = ItemContainer.CreateByTypeName(newContainerType, characterId, slotType, slotType != SlotType.None, parentUnit);
-
-        if (slotType != SlotType.None)
-            _allPersistentContainers.Add(newContainer.ContainerId, newContainer);
-
-        if (mateId > 0)
-            newContainer.MateId = mateId;
-
-        return newContainer;
     }
 
     public CofferContainer NewCofferContainer(uint characterId)
     {
         var coffer = new CofferContainer(characterId, true);
-        _allPersistentContainers.Add(coffer.ContainerId, coffer);
+        lock (_allPersistentContainers)
+        {
+            _allPersistentContainers.Add(coffer.ContainerId, coffer);
+        }
         return coffer;
     }
 
     public ItemContainer GetItemContainerByDbId(ulong dbId)
     {
-        return _allPersistentContainers.GetValueOrDefault(dbId);
+        lock (_allPersistentContainers)
+        {
+            return _allPersistentContainers.GetValueOrDefault(dbId);
+        }
     }
 
     /// <summary>
@@ -1736,12 +1764,20 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
             return;
 
         Logger.Info("Loading user items ...");
-        _allItems = [];
-        _allPersistentContainers = [];
+        lock (_removedItems)
+        {
+            _removedItems.Clear();
+        }
 
-        // No lock needed here since this is the first and only time it gets assigned a new list
-        // ReSharper disable once InconsistentlySynchronizedField
-        _removedItems = [];
+        lock (_allItems)
+        {
+            _allItems.Clear();
+        }
+
+        lock (_allPersistentContainers)
+        {
+            _allPersistentContainers.Clear();
+        }
 
         using (var connection = MySQL.CreateConnection())
         using (var command = connection.CreateCommand())
@@ -1763,7 +1799,10 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
                     container.ContainerSize = containerSize;
                     container.MateId = containerMateId;
 
-                    _allPersistentContainers.Add(container.ContainerId, container);
+                    lock (_allPersistentContainers)
+                    {
+                        _allPersistentContainers.Add(container.ContainerId, container);
+                    }
                     container.IsDirty = false;
                 }
             }
@@ -1849,13 +1888,28 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
                     item.ChargeCount = reader.GetInt32("charge_count");
 
                     // Add it to the global pool
-                    if (!_allItems.TryAdd(item.Id, item))
+                    bool added;
+                    lock (_allItems)
+                    {
+                        added = _allItems.TryAdd(item.Id, item);
+                    }
+
+                    if (!added)
                     {
                         ReleaseId(item.Id);
                         Logger.Error($"Failed to load item with ID {item.Id}, possible duplicate entries!");
                     }
 
-                    if (containerId > 0 && _allPersistentContainers.TryGetValue(containerId, out var container))
+                    ItemContainer container = null;
+                    if (containerId > 0)
+                    {
+                        lock (_allPersistentContainers)
+                        {
+                            _allPersistentContainers.TryGetValue(containerId, out container);
+                        }
+                    }
+
+                    if (container != null)
                     {
                         // Move item to its container (if defined)
                         if (container.AddOrMoveExistingItem(ItemTaskType.Invalid, item, item.Slot))
@@ -1957,8 +2011,11 @@ public class ItemManager(ISkillManager skillManager, IItemIdManager itemIdManage
     [Obsolete("You can now use directly linked item containers, and no longer need to load them into the character object")]
     public List<Item> LoadPlayerInventory(ICharacter character)
     {
-        var res = (from i in _allItems where i.Value.OwnerId == character.Id select i.Value).ToList();
-        return res;
+        lock (_allItems)
+        {
+            var res = (from i in _allItems where i.Value.OwnerId == character.Id select i.Value).ToList();
+            return res;
+        }
     }
 
     private void OnSkillsLoaded(object sender, EventArgs e)

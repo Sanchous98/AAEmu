@@ -49,6 +49,19 @@ public class SaveManager(
         {
             saveTask = null;
         }
+
+        // If a periodic save is still in progress, wait for it to finish first so that the
+        // final save below is not silently skipped (which could leave the last changes unsaved).
+        while (true)
+        {
+            lock (_lock)
+            {
+                if (!_isSaving)
+                    break;
+            }
+            await System.Threading.Tasks.Task.Delay(25);
+        }
+
         // Do one final save here
         DoSave();
     }
@@ -62,12 +75,18 @@ public class SaveManager(
 
     public bool DoSave()
     {
-        if (_isSaving)
-            return false;
-        var saved = false;
+        // Atomically claim the save slot. The flag must be checked and set under the same
+        // lock that guards the reset below, otherwise two threads can both enter a save.
         lock (_lock)
         {
+            if (_isSaving)
+                return false;
             _isSaving = true;
+        }
+
+        var saved = false;
+        try
+        {
             var stopWatch = new Stopwatch();
             stopWatch.Start();
             try
@@ -172,7 +191,13 @@ public class SaveManager(
             stopWatch.Stop();
             Logger.Debug("Saving data took {0}", stopWatch.Elapsed);
         }
-        _isSaving = false;
+        finally
+        {
+            lock (_lock)
+            {
+                _isSaving = false;
+            }
+        }
         return saved;
     }
 
