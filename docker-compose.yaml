@@ -10,8 +10,8 @@ services:
         volumes:
             - ./SQL/aaemu_login.sql:/docker-entrypoint-initdb.d/aaemu_login.sql
             - ./SQL/aaemu_game.sql:/docker-entrypoint-initdb.d/aaemu_game.sql
-            - ./.server_files/AAEmu.Database/mysql:/var/lib/mysql
-            # - db_data:/var/lib/mysql
+            # - ./.server_files/AAEmu.Database/mysql:/var/lib/mysql
+            - db_data:/var/lib/mysql
         environment:
             MYSQL_ROOT_PASSWORD: ${DB_PASSWORD}
         ports:
@@ -113,5 +113,5 @@ services:
             login:
               condition: service_healthy
             
-# volumes:
-#   db_data:
+volumes:
+  db_data:
