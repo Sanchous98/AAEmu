@@ -50,7 +50,22 @@ public class BaseMail
     /// <returns></returns>
     public bool CanReturnMail()
     {
-        return IsDelivered == false && Header.SenderId != Header.ReceiverId && Header.SenderId > 0 && (MailType == MailType.Normal || MailType == MailType.Express);
+        // A mail that was already handed back must never bounce again.
+        return IsDelivered == false && Header.SenderId != Header.ReceiverId && Header.SenderId > 0 && !Header.Returned && (MailType == MailType.Normal || MailType == MailType.Express);
+    }
+
+    /// <summary>
+    /// Whether <paramref name="characterId"/> may hand this mail back from their inbox.
+    /// Unlike <see cref="CanReturnMail"/> this does not require <c>IsDelivered == false</c>, because
+    /// a mail a player can actually see in their inbox is already delivered.
+    /// </summary>
+    public bool CanBeReturnedBy(uint characterId)
+    {
+        return Header.ReceiverId == characterId
+               && Header.SenderId > 0
+               && Header.SenderId != Header.ReceiverId
+               && !Header.Returned
+               && (MailType == MailType.Normal || MailType == MailType.Express);
     }
 
     public bool ReturnToSender()
@@ -70,6 +85,17 @@ public class BaseMail
         ReceiverName = Header.SenderName;
         Header.SenderId = originalReceiverId;
         Header.SenderName = originalReceiverName;
+
+        // Mark it as a returned mail so the original sender sees the "returned" marker in their mailbox.
+        Header.Returned = true;
+
+        // The 1.2 client has no native "returned" indicator, so tag the subject; the original sender
+        // then spots a bounced mail right in the inbox list.
+        const string returnedPrefix = "[Returned] ";
+        if (!(Title ?? string.Empty).StartsWith(returnedPrefix, StringComparison.Ordinal))
+            Title = returnedPrefix + (Title ?? string.Empty);
+
+        IsDirty = true;
 
         Send();
 

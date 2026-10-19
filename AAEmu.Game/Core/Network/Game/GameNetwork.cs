@@ -170,8 +170,9 @@ public class GameNetwork : Singleton<GameNetwork>
         RegisterPacket(CSOffsets.CSTakeAttachmentSequentially, 1, typeof(CSTakeAttachmentSequentially));
         RegisterPacket(CSOffsets.CSPayChargeMoneyPacket, 1, typeof(CSPayChargeMoneyPacket));
         RegisterPacket(CSOffsets.CSDeleteMailPacket, 1, typeof(CSDeleteMailPacket));
-        RegisterPacket(CSOffsets.CSReportSpamPacket, 1, typeof(CSReportSpamPacket));
-        //RegisterPacket(0x0a1, 1, typeof(CSReturnMailPacket)); TODO: this packet is not in the offsets 
+        // 0x0A3 is the client's mail "Return / Send back" opcode (verified against a live 1.2 client).
+        // CSReportSpamPacket had no confirmed opcode and was previously (incorrectly) bound to 0x0A3.
+        RegisterPacket(CSOffsets.CSReturnMailPacket, 1, typeof(CSReturnMailPacket));
         RegisterPacket(CSOffsets.CSRemoveMatePacket, 1, typeof(CSRemoveMatePacket));
         RegisterPacket(CSOffsets.CSChangeMateTargetPacket, 1, typeof(CSChangeMateTargetPacket));
         RegisterPacket(CSOffsets.CSChangeMateNamePacket, 1, typeof(CSChangeMateNamePacket));

@@ -153,8 +153,12 @@ public static class CSOffsets
     public const ushort CSTakeAttachmentSequentially = 0x09f;
     public const ushort CSPayChargeMoneyPacket = 0x0a0;
     public const ushort CSDeleteMailPacket = 0x0a1;
-    public const ushort CSReportSpamPacket = 0x0a3;
-    public const ushort CSReturnMailPacket = 0xfff; // TODO: this packet is not in the offsets 
+    // Live 1.2 (r208022) client sends 0x0A3 for the mailbox "Return" ("Send back / Refuse delivery and
+    // send back?") action, carrying the mail id (int64). This opcode was previously mislabeled as
+    // CSReportSpamPacket, which left CSReturnMailPacket at the 0xfff placeholder and made
+    // CharacterMails.ReturnMail() unreachable.
+    public const ushort CSReturnMailPacket = 0x0a3;
+    public const ushort CSReportSpamPacket = 0xfff; // TODO: real opcode unknown (0x0a3 == CSReturnMailPacket)
     public const ushort CSRemoveMatePacket = 0x0a4;
     public const ushort CSChangeMateTargetPacket = 0x0a5;
     public const ushort CSChangeMateNamePacket = 0x0a6;

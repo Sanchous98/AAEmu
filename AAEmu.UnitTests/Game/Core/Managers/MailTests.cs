@@ -136,6 +136,47 @@ public sealed class MailTests
     }
 
     [Test]
+    public async Task ReturnedMail_CannotBeReturnedAgain()
+    {
+        // Once a mail was handed back its Returned flag is set; it must not bounce a second time.
+        NameManager.Instance.AddCharacter(2, "bob", 1);
+
+        var mail = new BaseMail
+        {
+            MailType = MailType.Express,
+            ReceiverName = "bob".NormalizeName(),
+            Header = { SenderId = 1, SenderName = "tester".NormalizeName(), ReceiverId = 2 },
+            Body = { Text = "test", SendDate = DateTime.UtcNow, RecvDate = DateTime.UtcNow }
+        };
+
+        await Assert.That(mail.CanBeReturnedBy(2)).IsTrue();
+
+        mail.Header.Returned = true;
+
+        await Assert.That(mail.CanBeReturnedBy(2)).IsFalse();
+        await Assert.That(mail.CanReturnMail()).IsFalse();
+    }
+
+    [Test]
+    public async Task CanBeReturnedBy_RequiresReceiverAndEligibleType()
+    {
+        NameManager.Instance.AddCharacter(2, "bob", 1);
+
+        var mail = new BaseMail
+        {
+            MailType = MailType.Express,
+            ReceiverName = "bob".NormalizeName(),
+            Header = { SenderId = 1, SenderName = "tester".NormalizeName(), ReceiverId = 2 }
+        };
+
+        await Assert.That(mail.CanBeReturnedBy(2)).IsTrue();
+        await Assert.That(mail.CanBeReturnedBy(1)).IsFalse(); // only the receiver may return it
+
+        mail.MailType = MailType.Spam;
+        await Assert.That(mail.CanBeReturnedBy(2)).IsFalse(); // type is not returnable
+    }
+
+    [Test]
     public async Task PlayerNotFoundTest()
     {
 

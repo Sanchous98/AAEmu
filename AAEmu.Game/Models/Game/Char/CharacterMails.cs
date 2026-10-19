@@ -297,22 +297,33 @@ public class CharacterMails
 
     public void ReturnMail(long id)
     {
-        if (MailManager.Instance._allPlayerMails.TryGetValue(id, out var thisMail))
+        if (!MailManager.Instance._allPlayerMails.TryGetValue(id, out var thisMail))
+            return;
+
+        // Only the current recipient may send the mail back to its sender.
+        if (thisMail.Header.ReceiverId != Self.Id)
+            return;
+
+        // Check eligibility up front so a rejected return (e.g. an already-returned mail) leaves the mail
+        // untouched, and tell the player why nothing happened.
+        if (!thisMail.CanBeReturnedBy(Self.Id))
         {
-            var itemSlots = new List<(SlotType slotType, byte slot)>();
-            for (var i = 0; i < MailBody.MaxMailAttachments; i++)
-            {
-                var item = ItemManager.Instance.GetItemByItemId(thisMail.Body.Attachments[i].Id);
-                itemSlots.Add(item.SlotType == SlotType.None
-                    ? ((SlotType slotType, byte slot))(0, 0)
-                    : (item.SlotType, (byte)item.Slot));
-            }
-
-            SendMailToPlayer(thisMail.Header.Type, thisMail.Header.SenderName, thisMail.Header.Title, thisMail.Body.Text,
-                thisMail.Header.Attachments, thisMail.Body.CopperCoins, thisMail.Body.BillingAmount, thisMail.Body.MoneyAmount2,
-                    thisMail.Header.Extra, itemSlots);
-
-            DeleteMail(id, false);
+            Self.SendErrorMessage(ErrorMessageType.MailNotAllowedToReturn);
+            return;
         }
+
+        // The mail travels back to its original sender as-is (its attachments and money stay attached), so
+        // it becomes a fresh, unread mail for its new recipient. Resetting the delivery flag also satisfies
+        // BaseMail.CanReturnMail(), which otherwise rejects already-delivered mail.
+        if (thisMail.Header.Status != MailStatus.Read)
+        {
+            UnreadMailCount.UpdateReceived(thisMail.MailType, -1);
+            SendUnreadMailCount();
+        }
+
+        thisMail.Header.Status = MailStatus.Unread;
+        thisMail.IsDelivered = false;
+
+        thisMail.ReturnToSender();
     }
 }

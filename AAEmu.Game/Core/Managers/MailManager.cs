@@ -319,12 +319,20 @@ public class MailManager(IMailIdManager mailIdManager, INameManager nameManager,
             if (mail.Value.Header.Status != MailStatus.Read)
             {
                 character?.Mails.UnreadMailCount.UpdateReceived(mail.Value.MailType, 1);
-                var addBody = mail.Value.MailType == MailType.Charged;
 
-                character?.SendPacket(new SCGotMailPacket(mail.Value.Header, character.Mails.UnreadMailCount, false, addBody ? mail.Value.Body : null));
+                // Fire the "you have mail" notification only once, when we can actually reach the
+                // player. Re-sending it on every mailbox open made the client replay its new-mail
+                // sound whenever the box was opened; marking it delivered without a reachable
+                // character (e.g. during character load) would lose the notification entirely.
+                if (character == null || mail.Value.IsDelivered)
+                    continue;
+
+                var addBody = mail.Value.MailType == MailType.Charged;
+                character.SendPacket(new SCGotMailPacket(mail.Value.Header, character.Mails.UnreadMailCount, false, addBody ? mail.Value.Body : null));
                 mail.Value.IsDelivered = true;
             }
         }
+
         return tempMails;
     }
 
